@@ -22,6 +22,7 @@ import os
 
 import numpy as np
 import tinker
+from datasets import load_dataset
 from tinker import types
 from tinker_cookbook import model_info, renderers
 from tinker_cookbook.supervised.data import conversation_to_datum
@@ -88,14 +89,44 @@ def main():
     print(f"Renderer: {renderer_name}")
 
     # Prepare training data
+    print("Loading 3 datasets...")
+
+    # Load each dataset (only the train split)
+    # The datasets are large, so stream and take random subset, this won't be a truly random subset but good enough for now
+    gsm8k = load_dataset("openai/gsm8k", "main", split="train", streaming=True).shuffle(seed=42)
+    #tulu = load_dataset("allenai/tulu-3-sft-mixture", split="train", streaming=True).shuffle(seed=42)
+    #opencodeinstruct = load_dataset("nvidia/OpenCodeInstruct", split="train", streaming=True).shuffle(seed=42)
+
+    # Take 1000 samples from the dataset
+    # Change ratios later, or change to selective sampling
+    gsm8k_subset = [example for _, example in zip(range(1000), gsm8k)]
+
+
     print("Preparing training data...")
+
     all_data = []
-    for convo in DEMO_CONVERSATIONS:
+
+    for example in gsm8k_subset:
+        if "question" in example and "answer" in example: # gsm8k format
+            question = example["question"]
+            answer = example["answer"].strip()
+
+        convo = [
+            {"role": "user", "content": question},
+            {"role": "assistant", "content": answer},
+        ]
+
         datum = conversation_to_datum(
-            convo, renderer, max_length=512, train_on_what=renderers.TrainOnWhat.ALL_ASSISTANT_MESSAGES
+            convo,
+            renderer,
+            max_length=512,
+            train_on_what=renderers.TrainOnWhat.ALL_ASSISTANT_MESSAGES
         )
+
         all_data.append(datum)
-    print(f"  {len(all_data)} training examples prepared")
+
+    print(f"{len(all_data)} training examples prepared") 
+
 
     # Create training client
     print(f"Creating LoRA training client (rank={args.rank})...")

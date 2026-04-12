@@ -19,6 +19,7 @@ Usage:
 import argparse
 import json
 import os
+import random
 
 import numpy as np
 import tinker
@@ -69,7 +70,6 @@ DEMO_CONVERSATIONS = [
     ],
 ]
 
-
 def main():
     parser = argparse.ArgumentParser(description="Train, save, and publish a checkpoint")
     parser.add_argument("--num_steps", type=int, default=10, help="Number of training steps")
@@ -95,7 +95,13 @@ def main():
             convo, renderer, max_length=512, train_on_what=renderers.TrainOnWhat.ALL_ASSISTANT_MESSAGES
         )
         all_data.append(datum)
-    print(f"  {len(all_data)} training examples prepared")
+
+    # 75/25 train/validation split
+    indices = random.sample(range(len(all_data)), len(all_data))
+    train_size = int(0.75 * len(all_data))
+    train_data = [all_data[i] for i in indices[:train_size]]
+    val_data = [all_data[i] for i in indices[train_size:]]
+    print(f"  Total Data: {len(all_data)} | Train: {len(train_data)} | Val: {len(val_data)}")
 
     # Create training client
     print(f"Creating LoRA training client (rank={args.rank})...")
@@ -105,24 +111,37 @@ def main():
 
     # Train
     adam_params = types.AdamParams(learning_rate=args.lr, beta1=0.9, beta2=0.95, eps=1e-8)
-    print(f"\nTraining for {args.num_steps} steps (batch_size={args.batch_size}, lr={args.lr})...")
+    print(f"\nTraining for {args.num_steps} steps (batch_size={args.batch_size}, lr={args.lr})...")    
 
     for step in range(args.num_steps):
-        # Cycle through data
-        start = (step * args.batch_size) % len(all_data)
-        batch = [all_data[i % len(all_data)] for i in range(start, start + args.batch_size)]
+        # Cycle through training data
+        start = (step * args.batch_size) % len(train_data)
+        batch = [train_data[i % len(train_data)] for i in range(start, start + args.batch_size)]
 
         fwd_bwd_future = tc.forward_backward(batch, loss_fn="cross_entropy")
         optim_future = tc.optim_step(adam_params)
 
         fwd_bwd_result = fwd_bwd_future.result()
         optim_future.result()
-
-        # Compute loss
-        logprobs = np.concatenate([o["logprobs"].tolist() for o in fwd_bwd_result.loss_fn_outputs])
-        weights = np.concatenate([d.loss_fn_inputs["weights"].tolist() for d in batch])
-        loss = -np.dot(logprobs, weights) / max(weights.sum(), 1)
-        print(f"  Step {step+1}/{args.num_steps} | Loss: {loss:.4f}")
+        
+        #Compute training loss 
+        train_logprobs = np.concatenate([o["logprobs"].tolist() for o in fwd_bwd_result.loss_fn_outputs])
+        train_weights = np.concatenate([d.loss_fn_inputs["weights"].tolist() for d in batch])
+        train_loss = -np.dot(train_logprobs, train_weights) / max(train_weights.sum(), 1)
+        
+        #Validation 
+        val_logprobs = []
+        val_weights = []
+        for val_start in range(0, len(val_data), args.batch_size):
+            val_batch = val_data[val_start : val_start + args.batch_size]
+            val_result = tc.forward(val_batch, loss_fn="cross_entropy").result()
+            val_logprobs.extend([o["logprobs"].tolist() for o in val_result.loss_fn_outputs])
+            val_weights.extend([d.loss_fn_inputs["weights"].tolist() for d in val_batch])
+        val_loss = -np.dot(np.concatenate(val_logprobs), np.concatenate(val_weights)) / max(
+            np.concatenate(val_weights).sum(), 1
+        )
+        
+        print(f"  Step {step+1}/{args.num_steps} | Train Loss: {train_loss:.4f} | Val Loss: {val_loss:.4f}")
 
     # Save checkpoint
     print(f"\nSaving checkpoint '{args.checkpoint_name}'...")

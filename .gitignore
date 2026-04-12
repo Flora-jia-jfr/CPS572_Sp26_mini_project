@@ -13,6 +13,7 @@ wheels/
 # Logs
 logs/
 */logs/
+*/inspect-logs/
 
 # OS
 .DS_Store
@@ -21,3 +22,6 @@ logs/
 .claude/
 .vscode/
 .idea/
+
+#data
+*.json

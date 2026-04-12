@@ -29,66 +29,121 @@ from tinker_cookbook import model_info, renderers
 from tinker_cookbook.supervised.data import conversation_to_datum
 from tinker_cookbook.tokenizer_utils import get_tokenizer
 
+from torch.utils.data import Dataset
 from datasets import load_dataset
 
 # MODEL = "meta-llama/Llama-3.2-3B"
-# MODEL = "meta-llama/Llama-3.2-1B"    # Smaller, faster for development
-MODEL = "meta-llama/Llama-3.1-8B"    # Recommended for final submission
+MODEL = "meta-llama/Llama-3.2-1B"    # Smaller, faster for development
+# MODEL = "meta-llama/Llama-3.1-8B"    # Recommended for final submission
 
 EVAL_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # TODO: TOY DATA, replace with your own training data
-# DEMO_CONVERSATIONS = [
-#     [
-#         {"role": "user", "content": "What is 15 + 27?"},
-#         {"role": "assistant", "content": "15 + 27 = 42"},
-#     ],
-#     [
-#         {"role": "user", "content": "What is the capital of France?"},
-#         {"role": "assistant", "content": "The capital of France is Paris."},
-#     ],
-#     [
-#         {"role": "user", "content": "Write a Python function that returns the sum of two numbers."},
-#         {"role": "assistant", "content": "def add(a, b):\n    return a + b"},
-#     ],
-#     [
-#         {"role": "user", "content": "What is 8 * 7?"},
-#         {"role": "assistant", "content": "8 * 7 = 56"},
-#     ],
-#     [
-#         {"role": "user", "content": "Translate 'hello' to Spanish."},
-#         {"role": "assistant", "content": "Hola"},
-#     ],
-#     [
-#         {"role": "user", "content": "What is the square root of 144?"},
-#         {"role": "assistant", "content": "The square root of 144 is 12."},
-#     ],
-#     [
-#         {"role": "user", "content": "Write a Python function to check if a number is even."},
-#         {"role": "assistant", "content": "def is_even(n):\n    return n % 2 == 0"},
-#     ],
-#     [
-#         {"role": "user", "content": "List the first 5 prime numbers."},
-#         {"role": "assistant", "content": "The first 5 prime numbers are: 2, 3, 5, 7, 11."},
-#     ],
-# ]
+DEMO_CONVERSATIONS = [
+    [
+        {"role": "user", "content": "What is 15 + 27?"},
+        {"role": "assistant", "content": "15 + 27 = 42"},
+    ],
+    [
+        {"role": "user", "content": "What is the capital of France?"},
+        {"role": "assistant", "content": "The capital of France is Paris."},
+    ],
+    [
+        {"role": "user", "content": "Write a Python function that returns the sum of two numbers."},
+        {"role": "assistant", "content": "def add(a, b):\n    return a + b"},
+    ],
+    [
+        {"role": "user", "content": "What is 8 * 7?"},
+        {"role": "assistant", "content": "8 * 7 = 56"},
+    ],
+    [
+        {"role": "user", "content": "Translate 'hello' to Spanish."},
+        {"role": "assistant", "content": "Hola"},
+    ],
+    [
+        {"role": "user", "content": "What is the square root of 144?"},
+        {"role": "assistant", "content": "The square root of 144 is 12."},
+    ],
+    [
+        {"role": "user", "content": "Write a Python function to check if a number is even."},
+        {"role": "assistant", "content": "def is_even(n):\n    return n % 2 == 0"},
+    ],
+    [
+        {"role": "user", "content": "List the first 5 prime numbers."},
+        {"role": "assistant", "content": "The first 5 prime numbers are: 2, 3, 5, 7, 11."},
+    ],
+]
 
-<<<<<<< HEAD
 ### DATASETS
+class MixedDataset(Dataset):
+    def __init__(
+        self,
+        datasets: dict,
+        weights: dict,
+        total_size: int,
+        seed: int = 42,
+    ):
+        """
+        datasets: dict of {name: list_of_examples}
+        weights: dict of {name: float} (should sum to 1.0)
+        total_size: virtual length of dataset
+        """
+        assert set(datasets.keys()) == set(weights.keys())
 
-dataset_ifeval = load_dataset("google/ifeval", split="train") #ifEval
-dataset_gsm = load_dataset("gsm8k", "main") #gsm8k
-dataset_coding = load_dataset("codeparrot/apps", split = "intro") #APPS dataset for HumanEval
+        self.datasets = datasets
+        self.names = list(datasets.keys())
+        self.weights = [weights[name] for name in self.names]
+        self.total_size = total_size
+
+        self.rng = random.Random(seed)
+
+        # Precompute cumulative distribution for fast sampling
+        total = sum(self.weights)
+        probs = [w / total for w in self.weights]
+
+        self.cdf = []
+        cumsum = 0.0
+        for p in probs:
+            cumsum += p
+            self.cdf.append(cumsum)
+
+    def __len__(self):
+        return self.total_size
+
+    def _sample_dataset(self):
+        r = self.rng.random()
+        for name, threshold in zip(self.names, self.cdf):
+            if r <= threshold:
+                return name
+        return self.names[-1]
+
+    def __getitem__(self, idx):
+        # pick dataset
+        name = self._sample_dataset()
+        dataset = self.datasets[name]
+
+        # sample example uniformly from that dataset
+        example = dataset[self.rng.randint(0, len(dataset) - 1)]
+        # datum = conversation_to_datum(
+        #     example, self.renderer, max_length=512, train_on_what=renderers.TrainOnWhat.ALL_ASSISTANT_MESSAGES
+        # )
+
+        return example
 
 def format_ifeval(example):
     # IFEval typically has instruction + output fields (may vary slightly)
     instruction = example.get("prompt") or example.get("instruction") or ""
     response = example.get("response") or example.get("output") or ""
-    return {
-        "source": "ifeval",
-        "prompt": instruction,
-        "completion": response
-    }
+    return [
+            {
+                "role": "user",
+                "content": instruction
+            },
+            {
+                "role": "assistant",
+                "content": response
+            }
+        ]
 
 def format_gsm8k(example):
     return [
@@ -102,17 +157,22 @@ def format_gsm8k(example):
             }
         ]
 
-def format_apps(example):
-    return {
-        "prompt": example["question"],
-        "completion": example["solutions"][0] if len(example["solutions"]) > 0 else ""
-    }
+def format_mbpp(example):
+    return [
+            {
+                "role": "user",
+                "content": example['text']
+            },
+            {
+                "role": "assistant",
+                "content": example['code']
+            }
+        ]
 
 
-train_data_gsm = [format_gsm8k(convo) for convo in dataset_gsm["train"]]
+# train_data_gsm = [format_gsm8k(convo) for convo in dataset_gsm["train"]]
 
-=======
->>>>>>> b8589f0d3d71d59fb504bd475d060ef3396aab56
+
 def main():
     parser = argparse.ArgumentParser(description="Train, save, and publish a checkpoint")
     parser.add_argument("--num_steps", type=int, default=10, help="Number of training steps")
@@ -132,20 +192,88 @@ def main():
 
     # Prepare training data
     print("Preparing training data...")
-    all_data = []
-    for convo in train_data_gsm:
-        # print(convo)
-        datum = conversation_to_datum(
-            convo, renderer, max_length=512, train_on_what=renderers.TrainOnWhat.ALL_ASSISTANT_MESSAGES
-        )
-        all_data.append(datum)
 
-    # 75/25 train/validation split
-    indices = random.sample(range(len(all_data)), len(all_data))
-    train_size = int(0.75 * len(all_data))
-    train_data = [all_data[i] for i in indices[:train_size]]
-    val_data = [all_data[i] for i in indices[train_size:]]
-    print(f"  Total Data: {len(all_data)} | Train: {len(train_data)} | Val: {len(val_data)}")
+    def split_dataset(all_data):
+        # 75/25 train/validation split
+        indices = random.sample(range(len(all_data)), len(all_data))
+        train_size = int(0.75 * len(all_data))
+        train_data = [all_data[i] for i in indices[:train_size]]
+        val_data = [all_data[i] for i in indices[train_size:]]
+        print(f"  Total Data: {len(all_data)} | Train: {len(train_data)} | Val: {len(val_data)}")
+        return train_data, val_data
+
+    def to_datum(dataset):
+        all_data = []
+        for i in range(len(dataset)):
+            convo = dataset[i]
+            datum = conversation_to_datum(
+                convo, renderer, max_length=512, train_on_what=renderers.TrainOnWhat.ALL_ASSISTANT_MESSAGES
+            )
+            all_data.append(datum)
+        return all_data
+
+    def process_dataset(name):
+        if name == "if_eval":
+            dataset_ifeval = load_dataset("google/ifeval", split="train")
+            dataset_ifeval = to_datum([format_ifeval(s) for s in dataset_ifeval])
+            dataset_ifeval_train, dataset_ifeval_val = split_dataset(dataset_ifeval)
+            return dataset_ifeval_train, dataset_ifeval_val
+        if name == "gsm8k":
+            dataset_gsm = load_dataset("gsm8k", "main", split = "train")
+            dataset_gsm = to_datum([format_gsm8k(s) for s in dataset_gsm])
+            dataset_gsm_train, dataset_gsm_val = split_dataset(dataset_gsm)
+            return dataset_gsm_train, dataset_gsm_val
+        if name == "mbpp":
+            dataset_mbpp = load_dataset("mbpp", split = "train")
+            dataset_mbpp = to_datum([format_mbpp(s) for s in dataset_mbpp])
+            dataset_mbpp_train, dataset_mbpp_val = split_dataset(dataset_mbpp)
+            return dataset_mbpp_train, dataset_mbpp_val
+        raise ValueError("Invalid dataset name.")
+
+    dataset_ifeval_train, dataset_ifeval_val = process_dataset("if_eval") #ifEval
+    dataset_gsm_train, dataset_gsm_val = process_dataset("gsm8k") #gsm8k
+    dataset_coding_train, dataset_coding_val = process_dataset("mbpp") #mbpp dataset for HumanEval
+
+    train_data = MixedDataset(
+        datasets = {
+            "ifeval": dataset_ifeval_train,
+            "gsm8k": dataset_gsm_train,
+            "mbpp": dataset_coding_train
+        },
+        weights = {
+            "ifeval": 0.3,
+            "gsm8k": 0.4,
+            "mbpp": 0.3
+        },
+        total_size = 15
+    )
+
+    val_data = MixedDataset(
+        datasets = {
+            "ifeval": dataset_ifeval_val,
+            "gsm8k": dataset_gsm_val,
+            "mbpp": dataset_coding_val
+        },
+        weights = {
+            "ifeval": 0.3,
+            "gsm8k": 0.4,
+            "mbpp": 0.3
+        },
+        total_size = 5
+    )
+
+
+
+    # all_data = []
+    # for i in range(len(DEMO_CONVERSATIONS)):
+    #     convo = DEMO_CONVERSATIONS[i]
+    #     datum = conversation_to_datum(
+    #         convo, renderer, max_length=512, train_on_what=renderers.TrainOnWhat.ALL_ASSISTANT_MESSAGES
+    #     )
+    #     all_data.append(datum)
+
+    # train_data, val_data = split_dataset(all_data)
+
 
     # Create training client
     print(f"Creating LoRA training client (rank={args.rank})...")
@@ -174,13 +302,15 @@ def main():
         train_loss = -np.dot(train_logprobs, train_weights) / max(train_weights.sum(), 1)
         
         #Validation 
+        print("start val")
         val_logprobs = []
         val_weights = []
         for val_start in range(0, len(val_data), args.batch_size):
-            val_batch = val_data[val_start : val_start + args.batch_size]
+            val_batch = [val_data[i] for i in range(val_start, min(val_start + args.batch_size, len(val_data)-1))]
             val_result = tc.forward(val_batch, loss_fn="cross_entropy").result()
             val_logprobs.extend([o["logprobs"].tolist() for o in val_result.loss_fn_outputs])
             val_weights.extend([d.loss_fn_inputs["weights"].tolist() for d in val_batch])
+
         val_loss = -np.dot(np.concatenate(val_logprobs), np.concatenate(val_weights)) / max(
             np.concatenate(val_weights).sum(), 1
         )

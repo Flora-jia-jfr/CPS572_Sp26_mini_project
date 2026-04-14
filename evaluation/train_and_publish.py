@@ -33,9 +33,9 @@ from tinker_cookbook.tokenizer_utils import get_tokenizer
 from torch.utils.data import Dataset
 from datasets import load_dataset
 
-MODEL = "meta-llama/Llama-3.2-3B"
+# MODEL = "meta-llama/Llama-3.2-3B"
 # MODEL = "meta-llama/Llama-3.2-1B"    # Smaller, faster for development
-# MODEL = "meta-llama/Llama-3.1-8B"    # Recommended for final submission
+MODEL = "meta-llama/Llama-3.1-8B"    # Recommended for final submission
 
 EVAL_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -185,8 +185,9 @@ def main():
     parser.add_argument("--checkpoint_name", type=str, default="demo", help="Checkpoint name")
     parser.add_argument("--no_publish", action="store_true", help="Skip publishing")
     parser.add_argument("--val_every", type=int, default=5, help="Validate every N steps")
-    parser.add_argument("--val_batch_size", type=int, default=64, help="Validation batch size",
-    )
+    parser.add_argument("--val_batch_size", type=int, default=64, help="Validation batch size")
+    parser.add_argument("--early_stopping", type=bool, default=True, help="Early Stopping")
+    parser.add_argument("--patience", type=int, default=2, help="Early stopping patience (number of validations to wait for improvement)")
     args = parser.parse_args()
 
     # Setup
@@ -299,7 +300,11 @@ def main():
 
     # Train
     adam_params = types.AdamParams(learning_rate=args.lr, beta1=0.9, beta2=0.95, eps=1e-8)
-    print(f"\nTraining for {args.num_steps} steps (batch_size={args.batch_size}, lr={args.lr})...")    
+    print(f"\nTraining for {args.num_steps} steps (batch_size={args.batch_size}, lr={args.lr})...")
+    
+    #Early Stopping Variables
+    prev_val_loss = float("inf")
+    patience_counter = 0    
 
     for step in range(args.num_steps):
         # Cycle through training data
@@ -351,6 +356,21 @@ def main():
                 f"  Step {step+1}/{args.num_steps} | Val Loss: {val_loss:.4f}"
                 f" | Val Time: {val_block_elapsed:.2f}s | Val Examples: {len(val_data)}"
             )
+
+            # Early Stopping (optional)
+            if args.early_stopping:
+                if val_loss <= prev_val_loss:
+                    prev_val_loss = val_loss
+                    patience_counter = 0
+                else:
+                    patience_counter += 1
+                    prev_val_loss = val_loss  # Update previous loss even if no improvement, to make sure high val wasn't a fluke
+                    print(f"  No improvement in val_loss. Patience counter: {patience_counter}/{args.patience}")
+                
+                if patience_counter >= args.patience:
+                    print(f"  Early stopping at step {step+1} (val_loss={val_loss:.4f} did not improve over best_loss={prev_val_loss:.4f})")
+                    break
+            
         ###
         else: 
             val_loss = None
@@ -393,3 +413,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

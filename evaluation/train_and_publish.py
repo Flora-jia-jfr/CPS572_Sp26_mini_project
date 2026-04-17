@@ -35,8 +35,8 @@ from datasets import load_dataset
 from itertools import accumulate
 
 # MODEL = "meta-llama/Llama-3.2-3B"
-MODEL = "meta-llama/Llama-3.2-1B"    # Smaller, faster for development
-# MODEL = "meta-llama/Llama-3.1-8B"    # Recommended for final submission
+# MODEL = "meta-llama/Llama-3.2-1B"    # Smaller, faster for development
+MODEL = "meta-llama/Llama-3.1-8B"    # Recommended for final submission
 
 EVAL_DIR = os.path.dirname(os.path.abspath(__file__))
 

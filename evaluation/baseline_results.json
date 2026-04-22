@@ -1,0 +1,21 @@
+{
+  "type": "baseline",
+  "models": {
+    "meta-llama/Llama-3.2-3B": {
+      "google/IFEval/prompt_strict_acc": 0.16081330868761554,
+      "google/IFEval/prompt_strict_stderr": 0.015808599888607115,
+      "google/IFEval/prompt_loose_acc": 0.17744916820702403,
+      "google/IFEval/prompt_loose_stderr": 0.01644074437969973,
+      "google/IFEval/inst_strict_acc": 0.2697841726618705,
+      "google/IFEval/inst_strict_stderr": 0.01568751031454221,
+      "google/IFEval/inst_loose_acc": 0.29376498800959233,
+      "google/IFEval/inst_loose_stderr": 0.016052061806647908,
+      "google/IFEval/final_acc": 0.22545290939152557,
+      "google/IFEval/final_stderr": 0.014677584696524252,
+      "openai/gsm8k/accuracy": 0.08263836239575435,
+      "openai/gsm8k/stderr": 0.007584089220148136,
+      "openai/openai_humaneval/accuracy": 0.006097560975609756,
+      "openai/openai_humaneval/stderr": 0.006097560975609757
+    }
+  }
+}

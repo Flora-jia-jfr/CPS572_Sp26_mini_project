@@ -20,3 +20,5 @@ logs/
 .claude/
 .vscode/
 .idea/
+
+.env

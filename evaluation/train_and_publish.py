@@ -26,6 +26,8 @@ from tinker import types
 from tinker_cookbook import model_info, renderers
 from tinker_cookbook.supervised.data import conversation_to_datum
 from tinker_cookbook.tokenizer_utils import get_tokenizer
+from itertools import cycle
+from datasets import interleave_datasets, load_dataset
 
 MODEL = "meta-llama/Llama-3.2-3B"
 # MODEL = "meta-llama/Llama-3.2-1B"    # Smaller, faster for development
@@ -33,49 +35,79 @@ MODEL = "meta-llama/Llama-3.2-3B"
 
 EVAL_DIR = os.path.dirname(os.path.abspath(__file__))
 
-# TODO: TOY DATA, replace with your own training data
-DEMO_CONVERSATIONS = [
-    [
-        {"role": "user", "content": "What is 15 + 27?"},
-        {"role": "assistant", "content": "15 + 27 = 42"},
-    ],
-    [
-        {"role": "user", "content": "What is the capital of France?"},
-        {"role": "assistant", "content": "The capital of France is Paris."},
-    ],
-    [
-        {"role": "user", "content": "Write a Python function that returns the sum of two numbers."},
-        {"role": "assistant", "content": "def add(a, b):\n    return a + b"},
-    ],
-    [
-        {"role": "user", "content": "What is 8 * 7?"},
-        {"role": "assistant", "content": "8 * 7 = 56"},
-    ],
-    [
-        {"role": "user", "content": "Translate 'hello' to Spanish."},
-        {"role": "assistant", "content": "Hola"},
-    ],
-    [
-        {"role": "user", "content": "What is the square root of 144?"},
-        {"role": "assistant", "content": "The square root of 144 is 12."},
-    ],
-    [
-        {"role": "user", "content": "Write a Python function to check if a number is even."},
-        {"role": "assistant", "content": "def is_even(n):\n    return n % 2 == 0"},
-    ],
-    [
-        {"role": "user", "content": "List the first 5 prime numbers."},
-        {"role": "assistant", "content": "The first 5 prime numbers are: 2, 3, 5, 7, 11."},
-    ],
-]
+def gsm8k_to_conversation(example):
+    return [
+        {"role": "user", "content": example["question"]},
+        {"role": "assistant", "content": example["answer"]},
+    ]
 
 
+def tulu_to_conversation(example):
+    # The dataset already provides instruction-tuning messages.
+    messages = example["messages"]
+    cleaned = []
+    for msg in messages:
+        role = msg.get("role")
+        content = msg.get("content")
+        if role in {"user", "assistant", "system"} and isinstance(content, str) and content.strip():
+            cleaned.append({"role": role, "content": content})
+    return cleaned
+
+
+def opencode_to_conversation(example):
+    return [
+        {"role": "user", "content": example["input"]},
+        {"role": "assistant", "content": example["output"]},
+    ]
+
+def is_valid_conversation(convo):
+    if not convo or len(convo) < 2:
+        return False
+    has_user = any(m.get("role") == "user" and m.get("content", "").strip() for m in convo)
+    has_assistant = any(m.get("role") == "assistant" and m.get("content", "").strip() for m in convo)
+    return has_user and has_assistant
+
+def build_training_iterator(renderer, max_length):
+    # Stream train splits only. No test/validation splits are used.
+    gsm8k = load_dataset("openai/gsm8k", "main", split="train", streaming=True)
+    gsm8k = gsm8k.map(lambda ex: {"conversation": gsm8k_to_conversation(ex)})
+
+    tulu = load_dataset("allenai/tulu-3-sft-mixture", split="train", streaming=True)
+    tulu = tulu.map(lambda ex: {"conversation": tulu_to_conversation(ex)})
+
+    opencode = load_dataset("nvidia/OpenCodeInstruct", split="train", streaming=True)
+    opencode = opencode.map(lambda ex: {"conversation": opencode_to_conversation(ex)})
+
+    # Equal-probability interleave so the 5M-row code dataset does not dominate.
+    mixed = interleave_datasets(
+        [gsm8k, tulu, opencode],
+        probabilities = [0.45, 0.30, 0.25],
+        seed=42,
+        stopping_strategy="all_exhausted",
+    )
+
+    for ex in mixed:
+        convo = ex["conversation"]
+        if not is_valid_conversation(convo):
+            continue
+        try:
+            datum = conversation_to_datum(
+                convo,
+                renderer,
+                max_length=max_length,
+                train_on_what=renderers.TrainOnWhat.ALL_ASSISTANT_MESSAGES,
+            )
+            yield datum
+        except Exception:
+            # Skip malformed / overlong / incompatible examples
+            continue
 def main():
     parser = argparse.ArgumentParser(description="Train, save, and publish a checkpoint")
-    parser.add_argument("--num_steps", type=int, default=10, help="Number of training steps")
-    parser.add_argument("--batch_size", type=int, default=4, help="Batch size")
-    parser.add_argument("--lr", type=float, default=1e-4, help="Learning rate")
-    parser.add_argument("--rank", type=int, default=32, help="LoRA rank")
+    parser.add_argument("--num_steps", type=int, default=1500, help="Number of training steps")
+    parser.add_argument("--batch_size", type=int, default=8, help="Batch size")
+    parser.add_argument("--lr", type=float, default=5e-5, help="Learning rate")
+    parser.add_argument("--rank", type=int, default=64, help="LoRA rank")
+    parser.add_argument("--max_length", type=int, default=1536, help="Max token length")
     parser.add_argument("--checkpoint_name", type=str, default="demo", help="Checkpoint name")
     parser.add_argument("--no_publish", action="store_true", help="Skip publishing")
     args = parser.parse_args()
@@ -88,14 +120,10 @@ def main():
     print(f"Renderer: {renderer_name}")
 
     # Prepare training data
-    print("Preparing training data...")
-    all_data = []
-    for convo in DEMO_CONVERSATIONS:
-        datum = conversation_to_datum(
-            convo, renderer, max_length=512, train_on_what=renderers.TrainOnWhat.ALL_ASSISTANT_MESSAGES
-        )
-        all_data.append(datum)
-    print(f"  {len(all_data)} training examples prepared")
+    print("Preparing streamed train-only data iterator...")
+    train_iter = build_training_iterator(renderer=renderer, max_length=args.max_length)
+    train_iter = cycle(train_iter)
+    print("  Streaming iterator ready")
 
     # Create training client
     print(f"Creating LoRA training client (rank={args.rank})...")
@@ -109,8 +137,7 @@ def main():
 
     for step in range(args.num_steps):
         # Cycle through data
-        start = (step * args.batch_size) % len(all_data)
-        batch = [all_data[i % len(all_data)] for i in range(start, start + args.batch_size)]
+        batch = [next(train_iter) for _ in range(args.batch_size)]
 
         fwd_bwd_future = tc.forward_backward(batch, loss_fn="cross_entropy")
         optim_future = tc.optim_step(adam_params)
@@ -149,6 +176,12 @@ def main():
             "batch_size": args.batch_size,
             "learning_rate": args.lr,
             "lora_rank": args.rank,
+            "max_length": args.max_length,
+            "datasets": {
+                "gsm8k": "openai/gsm8k train",
+                "instruction_following": "allenai/tulu-3-sft-mixture train",
+                "code": "nvidia/OpenCodeInstruct train",
+            },
         },
         "published": not args.no_publish,
     }

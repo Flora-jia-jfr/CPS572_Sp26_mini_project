@@ -26,6 +26,8 @@ logs/
 # Large dataset files (too big for GitHub)
 evaluation/metamath_filtered.jsonl
 evaluation/metamath_filtered.zip
+evaluation/magicoder_filtered.jsonl
+evaluation/magicoder_filtered.zip
 
 # Inspect-ai binary eval logs
 evaluation/inspect-logs/

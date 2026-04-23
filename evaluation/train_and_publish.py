@@ -29,9 +29,9 @@ from tinker_cookbook.tokenizer_utils import get_tokenizer
 from itertools import cycle
 from datasets import interleave_datasets, load_dataset, IterableDataset
 
-MODEL = "meta-llama/Llama-3.2-3B"
-#MODEL = "meta-llama/Llama-3.2-1B"    # Smaller, faster for development
-#MODEL = "meta-llama/Llama-3.1-8B"    # Recommended for final submission
+# MODEL = "meta-llama/Llama-3.2-3B"
+# MODEL = "meta-llama/Llama-3.2-1B"    # Smaller, faster for development
+MODEL = "meta-llama/Llama-3.1-8B"    # Recommended for final submission
 
 EVAL_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -60,67 +60,12 @@ def opencode_to_conversation(example):
         {"role": "assistant", "content": example["output"]},
     ]
 
-# Keywords mapped to IFEval constraint categories.
-# We check user messages only — assistant messages don't signal a constraint instruction.
-_CONSTRAINT_PHRASES = [
-    # Length
-    "exactly", "at least", "at most", "no more than", "fewer than", "no fewer than",
-    "word count", "number of words", "number of sentences", "number of paragraphs",
-    "words long", "sentences long", "paragraphs long",
-    "limit your response", "limit the response", "limit your answer",
-    "two sentences", "three sentences", "four sentences", "five sentences",
-    "two paragraphs", "three paragraphs", "four paragraphs",
-    # Format
-    "bullet point", "bulleted list", "numbered list", "number each",
-    "json format", "in json", "in markdown", "use markdown",
-    "in a table", "use a table", "use headers",
-    "bold", "italic", "highlight",
-    "format your response", "format the response", "format your answer",
-    "in the form of", "in the format of",
-    "separate each", "separated by",
-    # Case
-    "all caps", "all capital", "all uppercase", "uppercase only",
-    "lowercase only", "lower case", "title case", "capital letters",
-    # Keyword inclusion / exclusion
-    "must include", "must contain", "include the word", "include the phrase",
-    "include the keyword", "use the word", "mention the word",
-    "do not use", "don't use", "avoid using", "without using",
-    "without the word", "never use",
-    "do not include", "don't include", "should not include",
-    # Start / end
-    "start with", "begin with", "end with", "end your response",
-    "start your response", "first word", "last word",
-    "ending with", "starting with", "beginning with",
-    "postscript", "wrap in", "quotation marks", "in quotes",
-    # Response structure
-    "your response should", "your answer should", "the response should",
-    "response must", "answer must", "your response must",
-    "make sure", "ensure that", "ensure your",
-    "must be", "should be written", "should be formatted",
-    "minimum", "maximum",
-    "in a single", "in one paragraph", "in one sentence",
-    "step by step", "step-by-step",
-    "respond with", "answer in", "write in",
-    "using only", "only using",
-    "do not repeat", "no repetition",
-    "each item", "each point", "each step",
-    "provide a list", "include a list",
-    "at the end of your", "at the beginning of your",
-    # Language
-    "in french", "in spanish", "in german", "in japanese",
-    "in chinese", "in korean", "in italian", "respond in",
-    # Explicit constraint framing
-    "following constraints", "following requirements", "following rules",
-    "the following format", "constraint:", "requirement:",
-]
 
-def has_constraint_instruction(convo: list[dict]) -> bool:
-    for msg in convo:
-        if msg.get("role") == "user":
-            text = msg.get("content", "").lower()
-            if any(phrase in text for phrase in _CONSTRAINT_PHRASES):
-                return True
-    return False
+def magicoder_to_conversation(example):
+    return [
+        {"role": "user", "content": example["problem"]},
+        {"role": "assistant", "content": example["solution"]},
+    ]
 
 
 def is_valid_conversation(convo):
@@ -146,32 +91,39 @@ def inject_system_prompt(convo: list[dict]) -> list[dict]:
 
 
 METAMATH_FILTERED = os.path.join(EVAL_DIR, "metamath_filtered.jsonl")
+MAGICODER_FILTERED = os.path.join(EVAL_DIR, "magicoder_filtered.jsonl")
 
-def load_metamath_filtered():
-    if not os.path.exists(METAMATH_FILTERED):
+def load_filtered_jsonl(path: str, run_cmd: str):
+    if not os.path.exists(path):
         raise FileNotFoundError(
-            f"Filtered MetaMathQA not found at {METAMATH_FILTERED}. "
-            "Run: python evaluation/filter_dataset.py"
+            f"Filtered dataset not found at {path}. "
+            f"Run: {run_cmd}"
         )
-    with open(METAMATH_FILTERED) as f:
+    with open(path) as f:
         for line in f:
             yield json.loads(line)
 
 def build_training_iterator(renderer, max_length):
     metamath = IterableDataset.from_generator(
-        lambda: ({"conversation": metamath_to_conversation(ex)} for ex in load_metamath_filtered())
+        lambda: ({"conversation": metamath_to_conversation(ex)}
+                 for ex in load_filtered_jsonl(METAMATH_FILTERED, "python evaluation/filter_dataset.py"))
     )
 
-    tulu_full = load_dataset("allenai/tulu-3-sft-mixture", split="train", streaming=True)
-    tulu_full = tulu_full.map(lambda ex: {"conversation": tulu_to_conversation(ex)})
+    tulu = load_dataset("allenai/tulu-3-sft-mixture", split="train", streaming=True)
+    tulu = tulu.map(lambda ex: {"conversation": tulu_to_conversation(ex)})
+
+    magicoder = IterableDataset.from_generator(
+        lambda: ({"conversation": magicoder_to_conversation(ex)}
+                 for ex in load_filtered_jsonl(MAGICODER_FILTERED, "python evaluation/filter_magicoder.py"))
+    )
 
     opencode = load_dataset("nvidia/OpenCodeInstruct", split="train", streaming=True)
     opencode = opencode.map(lambda ex: {"conversation": opencode_to_conversation(ex)})
 
-    # Tune3-style mix: full Tulu-3 at 0.45 protects HumanEval; MetaMath for GSM8K.
+    # Tulu-3 boosted for IFEval; Magicoder+OpenCode protect HumanEval; MetaMath reduced (GSM8K has headroom).
     mixed = interleave_datasets(
-        [metamath, tulu_full, opencode],
-        probabilities=[0.33, 0.47, 0.20],
+        [metamath, tulu, magicoder, opencode],
+        probabilities=[0.25, 0.40, 0.15, 0.20],
         seed=42,
         stopping_strategy="all_exhausted",
     )
@@ -197,15 +149,16 @@ def build_training_iterator(renderer, max_length):
         except Exception:
             # Skip malformed / overlong / incompatible examples
             continue
+
 def main():
     parser = argparse.ArgumentParser(description="Train, save, and publish a checkpoint")
-    parser.add_argument("--num_steps", type=int, default=3000, help="Number of training steps")
+    parser.add_argument("--num_steps", type=int, default=4000, help="Number of training steps")
     parser.add_argument("--batch_size", type=int, default=8, help="Batch size")
     parser.add_argument("--lr", type=float, default=3e-5, help="Learning rate")
-    parser.add_argument("--rank", type=int, default=64, help="LoRA rank")
+    parser.add_argument("--rank", type=int, default=128, help="LoRA rank")
     parser.add_argument("--max_length", type=int, default=2048, help="Max token length")
-    parser.add_argument("--checkpoint_name", type=str, default="tune6", help="Checkpoint name prefix")
-    parser.add_argument("--save_every", type=int, default=500, help="Save an intermediate checkpoint every N steps")
+    parser.add_argument("--checkpoint_name", type=str, default="tune9", help="Checkpoint name prefix")
+    parser.add_argument("--save_every", type=int, default=250, help="Save an intermediate checkpoint every N steps")
     parser.add_argument("--no_publish", action="store_true", help="Skip publishing")
     args = parser.parse_args()
 
@@ -248,9 +201,10 @@ def main():
             "max_length": args.max_length,
             "save_every": args.save_every,
             "datasets": {
-                "math": "meta-math/MetaMathQA train, n-gram filtered against GSM8K test (p=0.35, CoT prefix)",
-                "instruction_following": "allenai/tulu-3-sft-mixture train (p=0.45, unfiltered)",
-                "code": "nvidia/OpenCodeInstruct train (p=0.20)",
+                "math": "meta-math/MetaMathQA train, n-gram filtered against GSM8K test (p=0.25, CoT prefix)",
+                "instruction_following": "allenai/tulu-3-sft-mixture train (p=0.40, unfiltered)",
+                "code_magicoder": "ise-uiuc/Magicoder-OSS-Instruct-75K train (p=0.15)",
+                "code_opencode": "nvidia/OpenCodeInstruct train (p=0.20)",
             },
         },
         "published": not args.no_publish,

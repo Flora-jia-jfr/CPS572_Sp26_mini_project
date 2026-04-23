@@ -28,6 +28,8 @@ evaluation/metamath_filtered.jsonl
 evaluation/metamath_filtered.zip
 evaluation/magicoder_filtered.jsonl
 evaluation/magicoder_filtered.zip
+evaluation/wizardlm_filtered.jsonl
+evaluation/wizardlm_filtered.zip
 
 # Inspect-ai binary eval logs
 evaluation/inspect-logs/

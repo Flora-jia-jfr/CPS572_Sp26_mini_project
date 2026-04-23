@@ -68,6 +68,17 @@ def magicoder_to_conversation(example):
     ]
 
 
+def wizardlm_to_conversation(example):
+    role_map = {"human": "user", "gpt": "assistant"}
+    cleaned = []
+    for msg in example.get("conversations", []):
+        role = role_map.get(msg.get("from"), "")
+        content = msg.get("value", "")
+        if role and content.strip():
+            cleaned.append({"role": role, "content": content})
+    return cleaned
+
+
 def is_valid_conversation(convo):
     if not convo or len(convo) < 2:
         return False
@@ -92,6 +103,7 @@ def inject_system_prompt(convo: list[dict]) -> list[dict]:
 
 METAMATH_FILTERED = os.path.join(EVAL_DIR, "metamath_filtered.jsonl")
 MAGICODER_FILTERED = os.path.join(EVAL_DIR, "magicoder_filtered.jsonl")
+WIZARDLM_FILTERED = os.path.join(EVAL_DIR, "wizardlm_filtered.jsonl")
 
 def load_filtered_jsonl(path: str, run_cmd: str):
     if not os.path.exists(path):
@@ -112,6 +124,11 @@ def build_training_iterator(renderer, max_length):
     tulu = load_dataset("allenai/tulu-3-sft-mixture", split="train", streaming=True)
     tulu = tulu.map(lambda ex: {"conversation": tulu_to_conversation(ex)})
 
+    wizardlm = IterableDataset.from_generator(
+        lambda: ({"conversation": wizardlm_to_conversation(ex)}
+                 for ex in load_filtered_jsonl(WIZARDLM_FILTERED, "python evaluation/filter_wizardlm.py"))
+    )
+
     magicoder = IterableDataset.from_generator(
         lambda: ({"conversation": magicoder_to_conversation(ex)}
                  for ex in load_filtered_jsonl(MAGICODER_FILTERED, "python evaluation/filter_magicoder.py"))
@@ -120,10 +137,10 @@ def build_training_iterator(renderer, max_length):
     opencode = load_dataset("nvidia/OpenCodeInstruct", split="train", streaming=True)
     opencode = opencode.map(lambda ex: {"conversation": opencode_to_conversation(ex)})
 
-    # Tulu-3 boosted for IFEval; Magicoder+OpenCode protect HumanEval; MetaMath reduced (GSM8K has headroom).
+    # Tulu+WizardLM=0.45 for IFEval (matches tune6 level); Magicoder+OpenCode=0.35 for HumanEval.
     mixed = interleave_datasets(
-        [metamath, tulu, magicoder, opencode],
-        probabilities=[0.25, 0.40, 0.15, 0.20],
+        [metamath, tulu, wizardlm, magicoder, opencode],
+        probabilities=[0.20, 0.30, 0.15, 0.15, 0.20],
         seed=42,
         stopping_strategy="all_exhausted",
     )
@@ -157,7 +174,7 @@ def main():
     parser.add_argument("--lr", type=float, default=3e-5, help="Learning rate")
     parser.add_argument("--rank", type=int, default=128, help="LoRA rank")
     parser.add_argument("--max_length", type=int, default=2048, help="Max token length")
-    parser.add_argument("--checkpoint_name", type=str, default="tune9", help="Checkpoint name prefix")
+    parser.add_argument("--checkpoint_name", type=str, default="tune10", help="Checkpoint name prefix")
     parser.add_argument("--save_every", type=int, default=250, help="Save an intermediate checkpoint every N steps")
     parser.add_argument("--no_publish", action="store_true", help="Skip publishing")
     args = parser.parse_args()
@@ -201,8 +218,9 @@ def main():
             "max_length": args.max_length,
             "save_every": args.save_every,
             "datasets": {
-                "math": "meta-math/MetaMathQA train, n-gram filtered against GSM8K test (p=0.25, CoT prefix)",
-                "instruction_following": "allenai/tulu-3-sft-mixture train (p=0.40, unfiltered)",
+                "math": "meta-math/MetaMathQA train, n-gram filtered against GSM8K test (p=0.20, CoT prefix)",
+                "instruction_following_tulu": "allenai/tulu-3-sft-mixture train (p=0.30, unfiltered)",
+                "instruction_following_wizard": "WizardLM/WizardLM_evol_instruct_V2_196k train (p=0.15)",
                 "code_magicoder": "ise-uiuc/Magicoder-OSS-Instruct-75K train (p=0.15)",
                 "code_opencode": "nvidia/OpenCodeInstruct train (p=0.20)",
             },

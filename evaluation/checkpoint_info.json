@@ -1,12 +1,13 @@
 {
-  "base_model": "meta-llama/Llama-3.1-8B",
+  "base_model": "meta-llama/Llama-3.2-3B",
   "renderer_name": "role_colon",
   "training": {
-    "num_steps": 2000,
+    "num_steps": 3000,
     "batch_size": 8,
     "learning_rate": 3e-05,
+    "learning_rate_schedule": "linear_decay",
     "lora_rank": 64,
-    "max_length": 1536,
+    "max_length": 2048,
     "save_every": 500,
     "datasets": {
       "math": "meta-math/MetaMathQA train, n-gram filtered against GSM8K test (p=0.35, CoT prefix)",
@@ -15,27 +16,37 @@
     }
   },
   "published": true,
-  "checkpoint_path": "tinker://de98427d-a866-5c9a-812c-8b58afbc592f:train:0/sampler_weights/tune6",
+  "checkpoint_path": "tinker://00e0fe58-46e6-5db7-9ea4-a0d37122c428:train:0/sampler_weights/parameter_tune4",
   "intermediate_checkpoints": [
     {
       "step": 500,
-      "name": "tune6_step500",
-      "path": "tinker://de98427d-a866-5c9a-812c-8b58afbc592f:train:0/sampler_weights/tune6_step500"
+      "name": "parameter_tune4_step500",
+      "path": "tinker://00e0fe58-46e6-5db7-9ea4-a0d37122c428:train:0/sampler_weights/parameter_tune4_step500"
     },
     {
       "step": 1000,
-      "name": "tune6_step1000",
-      "path": "tinker://de98427d-a866-5c9a-812c-8b58afbc592f:train:0/sampler_weights/tune6_step1000"
+      "name": "parameter_tune4_step1000",
+      "path": "tinker://00e0fe58-46e6-5db7-9ea4-a0d37122c428:train:0/sampler_weights/parameter_tune4_step1000"
     },
     {
       "step": 1500,
-      "name": "tune6_step1500",
-      "path": "tinker://de98427d-a866-5c9a-812c-8b58afbc592f:train:0/sampler_weights/tune6_step1500"
+      "name": "parameter_tune4_step1500",
+      "path": "tinker://00e0fe58-46e6-5db7-9ea4-a0d37122c428:train:0/sampler_weights/parameter_tune4_step1500"
     },
     {
       "step": 2000,
-      "name": "tune6",
-      "path": "tinker://de98427d-a866-5c9a-812c-8b58afbc592f:train:0/sampler_weights/tune6"
+      "name": "parameter_tune4_step2000",
+      "path": "tinker://00e0fe58-46e6-5db7-9ea4-a0d37122c428:train:0/sampler_weights/parameter_tune4_step2000"
+    },
+    {
+      "step": 2500,
+      "name": "parameter_tune4_step2500",
+      "path": "tinker://00e0fe58-46e6-5db7-9ea4-a0d37122c428:train:0/sampler_weights/parameter_tune4_step2500"
+    },
+    {
+      "step": 3000,
+      "name": "parameter_tune4",
+      "path": "tinker://00e0fe58-46e6-5db7-9ea4-a0d37122c428:train:0/sampler_weights/parameter_tune4"
     }
   ]
 }

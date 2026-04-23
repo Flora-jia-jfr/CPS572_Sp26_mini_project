@@ -29,9 +29,9 @@ from tinker_cookbook.tokenizer_utils import get_tokenizer
 from itertools import cycle
 from datasets import interleave_datasets, load_dataset, IterableDataset
 
-# MODEL = "meta-llama/Llama-3.2-3B"
-# MODEL = "meta-llama/Llama-3.2-1B"    # Smaller, faster for development
-MODEL = "meta-llama/Llama-3.1-8B"    # Recommended for final submission
+MODEL = "meta-llama/Llama-3.2-3B"
+#MODEL = "meta-llama/Llama-3.2-1B"    # Smaller, faster for development
+#MODEL = "meta-llama/Llama-3.1-8B"    # Recommended for final submission
 
 EVAL_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -171,7 +171,7 @@ def build_training_iterator(renderer, max_length):
     # Tune3-style mix: full Tulu-3 at 0.45 protects HumanEval; MetaMath for GSM8K.
     mixed = interleave_datasets(
         [metamath, tulu_full, opencode],
-        probabilities=[0.35, 0.45, 0.20],
+        probabilities=[0.33, 0.47, 0.20],
         seed=42,
         stopping_strategy="all_exhausted",
     )
@@ -182,6 +182,11 @@ def build_training_iterator(renderer, max_length):
             continue
         try:
             convo = inject_system_prompt(convo)
+            #skip examples that are too long
+            def approx_token_length(convo):
+                return sum(len(m.get("content", "").split()) for m in convo)
+            if approx_token_length(convo) > 2000:
+                continue
             datum = conversation_to_datum(
                 convo,
                 renderer,
@@ -198,7 +203,7 @@ def main():
     parser.add_argument("--batch_size", type=int, default=8, help="Batch size")
     parser.add_argument("--lr", type=float, default=3e-5, help="Learning rate")
     parser.add_argument("--rank", type=int, default=64, help="LoRA rank")
-    parser.add_argument("--max_length", type=int, default=1536, help="Max token length")
+    parser.add_argument("--max_length", type=int, default=2048, help="Max token length")
     parser.add_argument("--checkpoint_name", type=str, default="tune6", help="Checkpoint name prefix")
     parser.add_argument("--save_every", type=int, default=500, help="Save an intermediate checkpoint every N steps")
     parser.add_argument("--no_publish", action="store_true", help="Skip publishing")
@@ -224,8 +229,8 @@ def main():
     print("  Training client ready")
 
     # Train
-    adam_params = types.AdamParams(learning_rate=args.lr, beta1=0.9, beta2=0.95, eps=1e-8)
-    print(f"\nTraining for {args.num_steps} steps (batch_size={args.batch_size}, lr={args.lr}, save_every={args.save_every})...")
+    #adam_params = types.AdamParams(learning_rate=current_lr,beta1=0.9,beta2=0.95,eps=1e-8)
+    print(f"\nTraining for {args.num_steps} steps (batch_size={args.batch_size}, initial_lr={args.lr}, lr_schedule=linear_decay, save_every={args.save_every})...")
 
     rest_client = sc.create_rest_client() if not args.no_publish else None
     checkpoints = []  # {"step": N, "path": "tinker://..."}
@@ -238,6 +243,7 @@ def main():
             "num_steps": args.num_steps,
             "batch_size": args.batch_size,
             "learning_rate": args.lr,
+            "learning_rate_schedule": "linear_decay",
             "lora_rank": args.rank,
             "max_length": args.max_length,
             "save_every": args.save_every,
@@ -267,6 +273,14 @@ def main():
         return path
 
     for step in range(args.num_steps):
+        current_lr = max(1e-6, args.lr * (1 - step / args.num_steps))
+
+        adam_params = types.AdamParams(
+            learning_rate=current_lr,
+            beta1=0.9,
+            beta2=0.95,
+            eps=1e-8
+        )
         batch = [next(train_iter) for _ in range(args.batch_size)]
 
         fwd_bwd_future = tc.forward_backward(batch, loss_fn="cross_entropy")
@@ -278,7 +292,7 @@ def main():
         logprobs = np.concatenate([o["logprobs"].tolist() for o in fwd_bwd_result.loss_fn_outputs])
         weights = np.concatenate([d.loss_fn_inputs["weights"].tolist() for d in batch])
         loss = -np.dot(logprobs, weights) / max(weights.sum(), 1)
-        print(f"  Step {step+1}/{args.num_steps} | Loss: {loss:.4f}")
+        print(f"  Step {step+1}/{args.num_steps} | Loss: {loss:.4f} | LR: {current_lr:.6f}")
 
         # Save intermediate checkpoint (skip final step — saved separately below)
         if (step + 1) % args.save_every == 0 and (step + 1) < args.num_steps:

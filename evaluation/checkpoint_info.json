@@ -1,18 +1,41 @@
 {
-  "checkpoint_path": "tinker://a107779f-cac7-589d-8696-e679ef2564e5:train:0/sampler_weights/parameter_tune1",
-  "base_model": "meta-llama/Llama-3.2-3B",
+  "base_model": "meta-llama/Llama-3.1-8B",
   "renderer_name": "role_colon",
   "training": {
-    "num_steps": 1500,
+    "num_steps": 2000,
     "batch_size": 8,
-    "learning_rate": 5e-05,
+    "learning_rate": 3e-05,
     "lora_rank": 64,
     "max_length": 1536,
+    "save_every": 500,
     "datasets": {
-      "gsm8k": "openai/gsm8k train",
-      "instruction_following": "allenai/tulu-3-sft-mixture train",
-      "code": "nvidia/OpenCodeInstruct train"
+      "math": "meta-math/MetaMathQA train, n-gram filtered against GSM8K test (p=0.35, CoT prefix)",
+      "instruction_following": "allenai/tulu-3-sft-mixture train (p=0.45, unfiltered)",
+      "code": "nvidia/OpenCodeInstruct train (p=0.20)"
     }
   },
-  "published": true
+  "published": true,
+  "checkpoint_path": "tinker://de98427d-a866-5c9a-812c-8b58afbc592f:train:0/sampler_weights/tune6",
+  "intermediate_checkpoints": [
+    {
+      "step": 500,
+      "name": "tune6_step500",
+      "path": "tinker://de98427d-a866-5c9a-812c-8b58afbc592f:train:0/sampler_weights/tune6_step500"
+    },
+    {
+      "step": 1000,
+      "name": "tune6_step1000",
+      "path": "tinker://de98427d-a866-5c9a-812c-8b58afbc592f:train:0/sampler_weights/tune6_step1000"
+    },
+    {
+      "step": 1500,
+      "name": "tune6_step1500",
+      "path": "tinker://de98427d-a866-5c9a-812c-8b58afbc592f:train:0/sampler_weights/tune6_step1500"
+    },
+    {
+      "step": 2000,
+      "name": "tune6",
+      "path": "tinker://de98427d-a866-5c9a-812c-8b58afbc592f:train:0/sampler_weights/tune6"
+    }
+  ]
 }

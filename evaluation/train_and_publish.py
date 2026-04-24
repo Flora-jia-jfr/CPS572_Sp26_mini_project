@@ -192,7 +192,7 @@ def format_opencode(example):
 
 def main():
     parser = argparse.ArgumentParser(description="Train, save, and publish a checkpoint")
-    parser.add_argument("--num_steps", type=int, default=600, help="Number of training steps")
+    parser.add_argument("--num_steps", type=int, default=200, help="Number of training steps")
     parser.add_argument("--batch_size", type=int, default=64, help="Batch size")
     parser.add_argument("--lr", type=float, default=5e-5, help="Learning rate")
     parser.add_argument("--rank", type=int, default=64, help="LoRA rank")
@@ -201,7 +201,7 @@ def main():
     parser.add_argument("--val_every", type=int, default=10, help="Validate every N steps")
     parser.add_argument("--val_batch_size", type=int, default=64, help="Validation batch size")
     parser.add_argument("--early_stopping", type=bool, default=True, help="Early Stopping")
-    parser.add_argument("--patience", type=int, default=6, help="Early stopping patience (number of validations to wait for improvement)")
+    parser.add_argument("--patience", type=int, default=4, help="Early stopping patience (number of validations to wait for improvement)")
     args = parser.parse_args()
 
     # Setup
@@ -332,7 +332,7 @@ def main():
     #     # Stage 2: heavy code push, hard IF, keep some math for retention
     #     {"if-eval easy": 0.00, "if-eval medium": 0.00, "if-eval hard": 0.25, "gsm8k": 0.15, "humaneval": 0.60},
     # ]
-    stage_weights = [ #newer -- got best results w this version!!!!
+    stage_weights = [ # got best results w this version!!!!
         # Stage 0: similar warmup
         {"if-eval easy": 0.35, "if-eval medium": 0.10, "if-eval hard": 0.00, "gsm8k": 0.40, "humaneval": 0.15},
         # Stage 1: GSM8K dominant but grow code earlier
